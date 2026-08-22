@@ -46,6 +46,11 @@ val HideFacebookAdComponents = patch(
         .forEach { dm -> runCatching { hookAdComponentRender(dm.toMethod()) } }
 
     // Stop requesting story ads in the first place, so none of the UI above is ever built.
+    // Search "AI mode" ads: block the query rather than the UI, same as the Stories and
+    // Profile Reels ad queries. Returning null reads as "nothing came back".
+    runCatching { ::searchAiModeAdsQueryFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookAdQueryFetch(dm.toMethod()) } }
+
     runCatching { ::storiesAdsPaginationMethodFingerprint.dexMethodList }.getOrNull().orEmpty()
         .forEach { dm -> runCatching { hookAdQueryFetch(dm.toMethod()) } }
 }

@@ -25,7 +25,11 @@ import io.github.nexalloy.revanced.facebook.hookIndicatorPillAdEligibility
 import io.github.nexalloy.revanced.facebook.hookInstreamBannerEligibility
 import io.github.nexalloy.revanced.facebook.hookLateFeedListSanitizer
 import io.github.nexalloy.revanced.facebook.hookListBuilderAppend
+import io.github.nexalloy.revanced.facebook.hookAdRequestNoOp
+import io.github.nexalloy.revanced.facebook.hookForceBoolean
+import io.github.nexalloy.revanced.facebook.hookInstantGamesAdsLoader
 import io.github.nexalloy.revanced.facebook.hookListResultFilter
+import io.github.nexalloy.revanced.facebook.hookNullAdResult
 import io.github.nexalloy.revanced.facebook.hookPlayableAdActivity
 import io.github.nexalloy.revanced.facebook.hookAdPluginListBuilder
 import io.github.nexalloy.revanced.facebook.hookPluginDescriptorGate
@@ -213,6 +217,13 @@ val HideFacebookAds = patch(
         hookSponsoredPoolResultMethods(poolClass)
     }
 
+    // The vendor sitting in front of the pool: the two methods the feed calls to pick
+    // which ad goes in the next slot. Both already answer "nothing eligible" by returning
+    // null — the pool logs empty_pool and the feed carries on with organic stories — so
+    // this puts them permanently on a path the app handles on its own every session.
+    runCatching { ::sponsoredStoryVendorMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookNullAdResult(dm.toMethod()) } }
+
     // ── 8. Story ad provider (in-disc) ────────────────────────────────────────
 
     // Every class that logs "ads_deletion" AND carries the provider shape — this replaces
@@ -264,6 +275,23 @@ val HideFacebookAds = patch(
     // ── 11. Audience Network reward fallbacks ─────────────────────────────────
 
     runCatching { hookAudienceNetworkRewardFallbacks(classLoader) }
+
+    // ── 11b. Instant Games ads (Quicksilver) ─────────────────────────────────
+    //
+    // A layer below everything in sections 9–11, which all sit on the JavaScript bridge
+    // and answer a game that has already loaded the ad code. Instant Games advertising
+    // ships as its own dynamic module, so refusing that load leaves nothing in the
+    // process to serve an ad in the first place. The banner runnable is hooked as well:
+    // it is what draws a banner over a running game, and it is reached without the
+    // bridge on a build where the module was already cached.
+
+    runCatching { hookInstantGamesAdsLoader(classLoader) }
+
+    runCatching { ::quicksilverAdsVoltronGateFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookForceBoolean(dm.toMethod(), false) } }
+
+    runCatching { ::quicksilverBannerAdLoaderMethodsFingerprint.dexMethodList }.getOrNull().orEmpty()
+        .forEach { dm -> runCatching { hookAdRequestNoOp(dm.toMethod()) } }
 
     // ── 12. Activity lifecycle hooks ──────────────────────────────────────────
 
