@@ -30,7 +30,6 @@ jobs:
     strategy:
       matrix:
         branch: ${{ fromJson(needs.setup.outputs.branches) }}
-        build_type: [debug, release]
 
     steps:
     - uses: actions/checkout@v6
@@ -61,23 +60,10 @@ jobs:
           printf "KEYSTORE_ALIAS_PASSWORD=%s\n" "$K_PASS" >> signing.properties
           printf "KEYSTORE_FILE=../release.jks\n" >> signing.properties
 
-    - name: Build Debug
-      if: matrix.build_type == 'debug'
-      run: ./gradlew assembleDebug
-
     - name: Build Release
-      if: matrix.build_type == 'release'
       run: ./gradlew assembleRelease
 
-    - name: Upload a Debug Artifact
-      if: matrix.build_type == 'debug'
-      uses: actions/upload-artifact@v7
-      with:
-        name: nexalloy-ci-${{ matrix.branch }}-debug-apk
-        path: app/build/outputs/apk/debug
-
     - name: Upload a Release Artifact
-      if: matrix.build_type == 'release'
       uses: actions/upload-artifact@v7
       with:
         name: nexalloy-ci-${{ matrix.branch }}-release-apk
@@ -147,13 +133,12 @@ jobs:
       run: |
         TAG=${{ steps.tag.outputs.tag }}
 
-        for dir in artifacts/nexalloy-ci-*-apk; do
+        for dir in artifacts/nexalloy-ci-*-release-apk; do
           NAME=$(basename "$dir")
-          BRANCH=$(echo "$NAME" | sed 's/nexalloy-ci-\(.*\)-\(debug\|release\)-apk/\1/')
-          BUILD_TYPE=$(echo "$NAME" | sed 's/nexalloy-ci-.*-\(debug\|release\)-apk/\1/')
+          BRANCH=$(echo "$NAME" | sed 's/nexalloy-ci-\(.*\)-release-apk/\1/')
 
-          APK=$(find "$dir" -name "app-${BUILD_TYPE}.apk" | head -1)
-          mv "$APK" "artifacts/NexAlloy-${BRANCH}-${BUILD_TYPE}-${TAG}.apk"
+          APK=$(find "$dir" -name "app-release.apk" | head -1)
+          mv "$APK" "artifacts/NexAlloy-${BRANCH}-release-${TAG}.apk"
         done
 
     - name: Prepare release body
