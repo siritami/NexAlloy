@@ -37,9 +37,123 @@ const val GRAPHQL_FEED_UNIT_EDGE_CLASS       = "com.facebook.graphql.model.Graph
 const val GRAPHQL_MULTI_ADS_FEED_UNIT_CLASS  = "com.facebook.graphql.model.GraphQLFBMultiAdsFeedUnit"
 const val GRAPHQL_QUICK_PROMO_FEED_UNIT_CLASS =
     "com.facebook.graphql.model.GraphQLQuickPromotionNativeTemplateFeedUnit"
+
+// ── Additional ad-carrying feed units present on the current build ────────────
+//
+// Found by listing every com.facebook.graphql.model.* type whose CamelCase tokens
+// include Ad/Ads/Sponsored/Promotion, then subtracting the two already handled above.
+// Three of the remainder are advertisements and are added here. The rest are not, and
+// are deliberately left out:
+//
+//   GraphQLGreetingCardPromotionFeedUnit, GraphQLThrowbackPromotionFeedUnit
+//       the user's own memories and birthday cards — organic content that merely
+//       carries "Promotion" in its name.
+//   GraphQLAdCreative, GraphQLAdImage, GraphQLAdsReportingInformation
+//       fragments of an ad rather than a feed unit; they never appear as the
+//       inflated unit on an edge, so testing for them here would never fire.
+
+/** The non-templated Quick Promotion unit. Only the *NativeTemplate* flavour was
+ *  handled before, so a promo delivered through the plain server-rendered unit was
+ *  never positively identified as sponsored. */
+const val GRAPHQL_QUICK_PROMOTION_FEED_UNIT_CLASS =
+    "com.facebook.graphql.model.GraphQLQuickPromotionFeedUnit"
+
+/** The holdout arm of an ad experiment. It occupies a feed slot exactly as a normal ad
+ *  does — the difference is in what the server measures, not in what the feed shows —
+ *  so it is refused on the same terms. */
+const val GRAPHQL_HOLDOUT_AD_FEED_UNIT_CLASS =
+    "com.facebook.graphql.model.GraphQLHoldoutAdFeedUnit"
+
+/** Banner ads delivered as a Bloks payload rather than as a native feed story. */
+const val GRAPHQL_BLOKS_BANNER_ADS_CLASS =
+    "com.facebook.graphql.model.GraphQLXFBBloksBannerAds"
+
+/**
+ * Every inflated feed-unit type that is, on its own, proof of an advertisement.
+ *
+ * Membership is a positive identification and never a heuristic: an item whose feed
+ * unit is one of these is refused without consulting its category or its token scan.
+ */
+val GRAPHQL_AD_FEED_UNIT_CLASSES = setOf(
+    GRAPHQL_MULTI_ADS_FEED_UNIT_CLASS,
+    GRAPHQL_QUICK_PROMO_FEED_UNIT_CLASS,
+    GRAPHQL_QUICK_PROMOTION_FEED_UNIT_CLASS,
+    GRAPHQL_HOLDOUT_AD_FEED_UNIT_CLASS,
+    GRAPHQL_BLOKS_BANNER_ADS_CLASS,
+)
+
+/**
+ * The same identification, done by GraphQL *type name* instead of by Java class name.
+ *
+ * [GRAPHQL_AD_FEED_UNIT_CLASSES] only fires for units that ship as a real
+ * `com.facebook.graphql.model.*` class. Auditing every `*FeedUnit` / `*AdUnit` type name
+ * in the shipped dex showed that two ad units no longer do: `RediscoveryAdsFeedUnit` and
+ * `LeadGenQualityAdUnit` are both carried by obfuscated tree models (`X.41K`, `X.azs`),
+ * so the class-name test could never see them. Their `getTypeName()` still returns the
+ * real name, and the inspector already reads it, so testing it here costs nothing.
+ *
+ * The token scan does not cover them either: [FEED_AD_SIGNAL_TOKENS] has no bare "ads"
+ * entry — deliberately, since "ads" hides inside Threads and Heads — and neither name
+ * contains "sponsored", "promotion" or "multiads". So both were passing every test.
+ *
+ * This is a positive identification, exactly like the class set: membership proves an
+ * advertisement, absence proves nothing. `GreetingCardPromotionFeedUnit` and
+ * `ThrowbackPromotionFeedUnit` are the user's own memories and birthday cards and stay
+ * out, for the same reason they are excluded from the class set.
+ */
+val GRAPHQL_AD_FEED_UNIT_TYPE_NAMES = setOf(
+    "FBMultiAdsFeedUnit",
+    "HoldoutAdFeedUnit",
+    "QuickPromotionFeedUnit",
+    "QuickPromotionNativeTemplateFeedUnit",
+    "VibesRifuQuickPromotionFeedUnit",
+    "XFBBloksBannerAds",
+    // No GraphQL model class on this build — the whole reason this set exists.
+    "RediscoveryAdsFeedUnit",
+    "LeadGenQualityAdUnit",
+)
+
 const val AUDIENCE_NETWORK_ACTIVITY_CLASS        = "com.facebook.ads.AudienceNetworkActivity"
 const val AUDIENCE_NETWORK_REMOTE_ACTIVITY_CLASS = "com.facebook.ads.internal.ipc.AudienceNetworkRemoteActivity"
 const val NEKO_PLAYABLE_ACTIVITY_CLASS           = "com.facebook.neko.playables.activity.NekoPlayableAdActivity"
+
+/**
+ * The loader for Instant Games advertising, which ships as its own dynamic (Voltron)
+ * module rather than as part of the app.
+ *
+ * Unobfuscated, like the Audience Network and Neko classes above, so it is looked up by
+ * name rather than fingerprinted.
+ *
+ * **Expect this lookup to miss on FB575 and later.** On FB574 the class was defined in
+ * the base dex. On FB575 only a reference to it survives there — the definition ships
+ * inside the `instantgamesads` Voltron module itself, which is downloaded when a game
+ * first asks for an ad, long after patch time. So [hookInstantGamesAdsLoader] returning
+ * without hooking anything is the normal outcome on current builds, not a failure.
+ *
+ * The defence on those builds is carried by [quicksilverAdsVoltronGateFingerprint] and
+ * [quicksilverBannerAdLoaderMethodsFingerprint] instead, both of which resolve against
+ * the base dex and were verified present on FB575. The gate is the better hook of the
+ * two anyway: it is what reports whether the ads module finished loading, so answering
+ * "it did not" covers the module however it was fetched.
+ *
+ * The name lookup is kept because it costs one failed `loadClass` and still lands on any
+ * build — or any device with a stale install — where the class is in the base dex.
+ *
+ * This is a layer below every game-ad hook the module had before. Those all sit on the
+ * JavaScript bridge: the game asks for an ad, and the bridge answers that none is
+ * available. That works, but the ad code has already been downloaded and loaded into the
+ * process by then. Refusing the module load instead means there is nothing there to ask.
+ *
+ * The app handles this state on its own — it logs an IOException and carries on when the
+ * Voltron package cannot be fetched, which is what happens to anyone whose download fails.
+ */
+const val QUICKSILVER_ADS_LOADER_CLASS =
+    "com.facebook.quicksilver.webviewprocess.QuicksilverSeparateProcessAdsLoader"
+
+/** Gate answering "is the ads module loaded", and the module-load waiter behind it. */
+const val QUICKSILVER_ADS_LOADED_METHOD = "isInstantGamesAdsLoaded"
+const val QUICKSILVER_ADS_LOAD_METHOD   = "loadInstantGamesAdsVoltronModule"
+const val QUICKSILVER_ADS_RESET_METHOD  = "resetInstantGamesAdsModuleLoadState"
 
 const val GAME_AD_REJECTION_MESSAGE   = "Game ad request blocked"
 const val GAME_AD_REJECTION_CODE      = "CLIENT_UNSUPPORTED_OPERATION"
@@ -377,10 +491,18 @@ class FeedItemInspector(itemContractTypes: Collection<Class<*>>) {
         val backendData            = backendDataFrom(edge)
         val inflatedUnitClassName  = feedUnit?.javaClass?.name
         val backendUnitClassName   = backendData?.javaClass?.name
-        if (inflatedUnitClassName == GRAPHQL_MULTI_ADS_FEED_UNIT_CLASS ||
-            inflatedUnitClassName == GRAPHQL_QUICK_PROMO_FEED_UNIT_CLASS) return true
+        if (inflatedUnitClassName in GRAPHQL_AD_FEED_UNIT_CLASSES ||
+            backendUnitClassName in GRAPHQL_AD_FEED_UNIT_CLASSES) return true
 
-        val typeName = readTypeName(feedUnit) ?: readTypeName(backendData)
+        // Both sides are read, rather than the first non-null one, because this test can
+        // only ever say "yes": a unit whose type name is in the set is an advertisement,
+        // and one whose name is absent falls through to exactly the checks below.
+        val feedUnitTypeName = readTypeName(feedUnit)
+        val backendTypeName  = readTypeName(backendData)
+        if (feedUnitTypeName in GRAPHQL_AD_FEED_UNIT_TYPE_NAMES ||
+            backendTypeName  in GRAPHQL_AD_FEED_UNIT_TYPE_NAMES) return true
+
+        val typeName = feedUnitTypeName ?: backendTypeName
         if (isLikelyAdTypeName(typeName) ||
             isAdSignalText(inflatedUnitClassName) ||
             isAdSignalText(backendUnitClassName)) return true
@@ -470,7 +592,7 @@ class FeedItemInspector(itemContractTypes: Collection<Class<*>>) {
                 ?: resolveNamedNoArgAccessor(edge.javaClass, "A03")
                 ?: resolveChildAccessor(edge) { v ->
                     val cn = v?.javaClass?.name
-                    cn == GRAPHQL_MULTI_ADS_FEED_UNIT_CLASS || cn == GRAPHQL_QUICK_PROMO_FEED_UNIT_CLASS ||
+                    cn in GRAPHQL_AD_FEED_UNIT_CLASSES ||
                     readTypeName(v)?.let { it != "FeedUnitEdge" && it != "FeedBackendData" } == true
                 }
         }
@@ -765,8 +887,20 @@ private fun isAdOnlyPluginPack(instance: Any): Boolean {
     }
 }
 
-/** See [isAdOnlyPluginPack]. */
-val AD_ONLY_PLUGIN_PACK_TOKENS = listOf("Ads", "AdBreak", "AdOverlay")
+/**
+ * See [isAdOnlyPluginPack].
+ *
+ * "SqueezebackAd" was added after listing every plugin and descriptor name in the app
+ * that contains an ad token and checking which of them the three original tokens miss.
+ * All but one of the misses are trackers or organic plugins; the exception is the
+ * squeezeback ad — the advert that shrinks a live video into a corner while it plays —
+ * which is delivered by SqueezebackAdPlugin and SqueezebackAdFullscreenPlugin and was
+ * therefore never refused at the descriptor gate.
+ *
+ * Still deliberately NOT a bare "Ad": that substring hides inside ordinary words such
+ * as Loading and Adaptive, and matching it would silently disable organic plugins.
+ */
+val AD_ONLY_PLUGIN_PACK_TOKENS = listOf("Ads", "AdBreak", "AdOverlay", "SqueezebackAd")
 
 private val pluginHooksInstalled = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
@@ -880,6 +1014,123 @@ fun hookAdQueryFetch(method: Method) {
     if (!pluginHooksInstalled.add(methodHookKey(method))) return
     XposedBridge.hookMethod(method, object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) { param.result = null }
+    })
+}
+
+// ─── Hook installers – ad REQUEST layer ───────────────────────────────────────
+//
+// Everything below stops an advertisement from being asked for, as opposed to removing
+// it once it has arrived. That is the cheaper half of the job and the less visible one:
+// a slot that was never filled leaves no gap to collapse, no placeholder to blank and
+// no impression to report, and it saves the bandwidth the creative would have cost.
+//
+// All three installers refuse to touch a method whose return type they cannot satisfy,
+// because the failure mode of guessing wrong here is a ClassCastException inside
+// Facebook's own code rather than a missed ad.
+
+/**
+ * Skips a `void` ad-request method entirely.
+ *
+ * Restricted to `void` on purpose. Xposed reports "skip the body" by setting a result,
+ * and for any other return type that result has to be a value the caller can use — a
+ * null returned to code expecting a list or a primitive crashes the surface instead of
+ * silencing it. Callers that need a value use [hookEmptyCollectionResult] instead.
+ */
+fun hookAdRequestNoOp(method: Method) {
+    if (method.returnType != Void.TYPE) return
+    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    XposedBridge.hookMethod(method, object : XC_MethodHook() {
+        override fun beforeHookedMethod(param: MethodHookParam) { param.result = null }
+    })
+}
+
+/**
+ * Returns an empty collection from a method that hands back a batch of ads.
+ *
+ * Used where the caller stores or iterates the result rather than checking it for null:
+ * "no ads came back" is a state those callers already handle on every empty response,
+ * whereas null is not.
+ */
+fun hookEmptyCollectionResult(method: Method) {
+    val empty = buildEmptyListReturn(method.returnType) ?: return
+    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    XposedBridge.hookMethod(method, object : XC_MethodHook() {
+        override fun beforeHookedMethod(param: MethodHookParam) { param.result = empty }
+    })
+}
+
+/**
+ * Answers "there is no advertisement to serve" from a method whose whole job is to hand
+ * one back.
+ *
+ * Distinct from [hookAdRequestNoOp], which only handles `void`, and from
+ * [hookEmptyCollectionResult], which needs a collection to hand back: these methods
+ * return a single feed-unit edge and already have a documented no-ad path — the vendor
+ * logs `empty_pool` and the caller moves on to the next organic story. Null is the value
+ * that path produces, so it is the value returned here.
+ *
+ * Shape-checked like the other request-layer installers: a primitive or `void` return
+ * cannot take a null, so those are left alone rather than crashed.
+ */
+fun hookNullAdResult(method: Method) {
+    val returnType = method.returnType
+    if (returnType == Void.TYPE || returnType.isPrimitive) return
+    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    XposedBridge.hookMethod(method, object : XC_MethodHook() {
+        override fun beforeHookedMethod(param: MethodHookParam) { param.result = null }
+    })
+}
+
+/**
+ * Stops Instant Games advertising being loaded into the process at all.
+ *
+ * Three methods on one unobfuscated class, each shape-checked before it is touched:
+ *
+ *  - `isInstantGamesAdsLoaded()` is answered `false`, so every caller sees the state it
+ *    already sees on a device where the module download failed.
+ *  - `loadInstantGamesAdsVoltronModule(Context)` is skipped, so the download is never
+ *    started. It is `void` and already logs-and-returns on IOException, so callers do
+ *    not depend on it having succeeded.
+ *  - `resetInstantGamesAdsModuleLoadState()` is deliberately left alone: it clears the
+ *    loader's cached state, and letting it run keeps the loader consistent with itself.
+ *
+ * Complementary to the JavaScript-bridge hooks rather than a replacement for them. The
+ * bridge answers a game that asks for an ad; this removes the code that would have
+ * served one. A game running against an older cached module still meets the bridge.
+ *
+ * Returns silently when the class is not present. That is the expected result on FB575
+ * and later, where the class moved into the Voltron module — see
+ * [QUICKSILVER_ADS_LOADER_CLASS] for why, and for which hooks carry the surface instead.
+ */
+fun hookInstantGamesAdsLoader(classLoader: ClassLoader) {
+    val loaderClass = runCatching { classLoader.loadClass(QUICKSILVER_ADS_LOADER_CLASS) }.getOrNull() ?: return
+
+    runCatching {
+        loaderClass.declaredMethods
+            .firstOrNull { it.name == QUICKSILVER_ADS_LOADED_METHOD && it.parameterCount == 0 }
+            ?.apply { isAccessible = true }
+            ?.let { hookForceBoolean(it, false) }
+    }
+
+    runCatching {
+        loaderClass.declaredMethods
+            .firstOrNull { it.name == QUICKSILVER_ADS_LOAD_METHOD && it.returnType == Void.TYPE }
+            ?.apply { isAccessible = true }
+            ?.let { hookAdRequestNoOp(it) }
+    }
+}
+
+/**
+ * Forces an eligibility gate to answer [value].
+ *
+ * The gates this is pointed at are the ones an ad pipeline asks before allocating a
+ * slot, so answering "not eligible" removes the slot rather than emptying it.
+ */
+fun hookForceBoolean(method: Method, value: Boolean = false) {
+    if (method.returnType != java.lang.Boolean.TYPE && method.returnType != java.lang.Boolean::class.java) return
+    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    XposedBridge.hookMethod(method, object : XC_MethodHook() {
+        override fun beforeHookedMethod(param: MethodHookParam) { param.result = value }
     })
 }
 
