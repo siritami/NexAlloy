@@ -19,6 +19,7 @@
         <package android:name="com.facebook.katana" />
         <package android:name="com.google.android.googlequicksearchbox" />
         <package android:name="com.twitter.android" />
+        <package android:name="com.zing.zalo" />
     </queries>
 
     <application
