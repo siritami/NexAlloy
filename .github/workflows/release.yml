@@ -149,7 +149,10 @@ jobs:
           BRANCH="${GITHUB_REF##*/}"
           echo "body=Build from branch: ${BRANCH}" >> $GITHUB_OUTPUT
         else
-          echo "body=Nonroot: https://github.com/gnadgnaoh/NexAlloy-NonRoot/releases" >> $GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "Download non-root version from:" >> $GITHUB_OUTPUT
+          echo "https://github.com/gnadgnaoh/NexAlloy-NonRoot/releases" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
         fi
 
     - name: Create Release
